@@ -1,11 +1,11 @@
 import cv2
 import os
 import numpy as np
-import threading
-from NodeManager import Node
 
 class Camera:
     
+    ## TODO : Calculate this based on resolution
+    MIN_CONTOUR_AREA = 20
     
     def __init__(self,name,path):
         self.name = ""
@@ -29,8 +29,7 @@ class Camera:
         self.path = path
   
     def readFrame(self):
-        ret, frame = self.cap.read()
-        self.frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        ret, self.frame = self.cap.read()
         return ret
     
     def getBrightestContour(self):
@@ -39,14 +38,24 @@ class Camera:
         cy = 0
         cont = None
         
-        imgGray = cv2.cvtColor(self.frame, cv2.COLOR_BGR2GRAY)
-        imgGray = cv2.medianBlur(imgGray, 5)
+        #cv2.imwrite("CapturedCalData/debug_orig.png",self.frame)
 
-        ret, threshed = cv2.threshold(imgGray, 64, 255, cv2.THRESH_BINARY)
+        
+        blur = cv2.medianBlur(self.frame, 5)
+        blur = cv2.cvtColor(blur, cv2.COLOR_BGR2HSV)
+        brightness = blur[:,:,2]
+        #cv2.imwrite("CapturedCalData/debug_gray.png",brightness)
+
+
+        ret, threshed = cv2.threshold(brightness, 64, 255, cv2.THRESH_BINARY)
+
+        #cv2.imwrite("CapturedCalData/debug_thresh.png",threshed)
 
         contours, hierarchy = cv2.findContours(
             threshed, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
 
+
+        contours = [cnt for cnt in contours if cv2.contourArea(cnt) > self.MIN_CONTOUR_AREA]
         contours = sorted(contours, key=cv2.contourArea)
 
         if len(contours) > 0:
@@ -82,9 +91,8 @@ class Camera:
         cont = None
         
   
-        
+        ## TODO : USE HSV HERE INSTEAD OF RGB!!
         blured_image = cv2.medianBlur(self.frame, 5)
-        cv2.cvtColor(blured_image, cv2.COLOR_BGR2RGB)
         
         color  = np.array(color, dtype = np.float32)
         target_unit = color / np.linalg.norm(color)
@@ -103,9 +111,11 @@ class Camera:
         contours, hierarchy = cv2.findContours(
             threshed, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
 
-        #contours = sorted(contours, key=cv2.contourArea)
         def _contourValue(cnt):
             return self.getAverageInContour(gray_result,cnt)[0]
+        contours = [cnt for cnt in contours if cv2.contourArea(cnt) > self.MIN_CONTOUR_AREA]
+        
+        ## TODO : CUTOFF HERE INSTEAD OF SORTING
         contours = sorted(contours, key=_contourValue)
 
         if len(contours) > 0:

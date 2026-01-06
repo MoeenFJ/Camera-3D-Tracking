@@ -51,7 +51,7 @@ class NodeManager:
         self.managerThread = None
         self.nodes_to_reg = {}
         self.nodes = {}
-        self.colors = [(255,255,255),(255,255,0),(0,255,255),(255,0,255),(255,0,0),(0,255,0),(0,0,255)]
+        self.colors = [(255,255,255),(255,255,0),(0,255,255),(255,0,255),(0,255,0),(0,0,255),(255,0,0)]
         
         self.port = port
         self.sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)

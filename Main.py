@@ -47,7 +47,6 @@ for camPath in glob.glob(CAMDIR):
 while len(manager.nodes)<2:
     pass
 
-time.sleep(2)
 
 def RGBtoBGR(color):
     return (color[2],color[1],color[0])
@@ -68,6 +67,7 @@ def colorCalibration():
                 continue
             otherNode.light_off()
             print(f"Turn of {otherNode.color}, {otherNode.addr}")
+        time.sleep(1)
         for cam in cameras:
             for i in range(10):
                 cam.readFrame()
