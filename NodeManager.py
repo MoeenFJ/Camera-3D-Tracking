@@ -15,6 +15,7 @@ class Node:
         self.acc = ()
         self.rot = ()
         self.connected = False
+        self.pos = (0.0,0.0,0.0)
         
         self.mac = mac
         self.name = name

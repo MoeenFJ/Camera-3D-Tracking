@@ -6,7 +6,7 @@ import numpy as np
 class Camera:
     
     ## TODO : Calculate this based on resolution
-    MIN_CONTOUR_AREA = 1000
+    MIN_CONTOUR_AREA = 100
     
     def __init__(self,name,path):
         self.name = ""
@@ -15,8 +15,7 @@ class Camera:
         self.extMat = np.zeros((3,4))
         self.T = None
         self.R = None
-        self.tvec = None
-        self.rvec = None
+        
         self.calibrated = False
         self.projectionMatrix = None
         self.inMatrix = None
@@ -151,7 +150,7 @@ class Camera:
         
     def calibrateColor(self,color):
         f,c,cnt = self.getBrightestContour()
-        assert f is not False, "A cam couldnt fine the node!"
+        assert f is not False, f"A cam couldnt fine the node! : {self.name}"
         observedColor = self.savedFrame[c[1],c[0]]
         if f:
             self.colorMap[color] = observedColor
