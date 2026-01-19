@@ -13,8 +13,8 @@ class Camera:
         self.path = ""
         self.cap = None
         self.extMat = np.zeros((3,4))
-        self.T = None
-        self.R = None
+        self.t = np.zeros((1,3))
+        self.R = np.zeros((3,3))
         
         self.calibrated = False
         self.projectionMatrix = None
@@ -30,7 +30,7 @@ class Camera:
         self.path = path
         
         self.thread = threading.Thread(target=self._update, args=())
-        self.thread.daemon = True # Thread dies when main program exits
+        self.thread.daemon = False 
         self.thread.start()
         
     def _update(self):

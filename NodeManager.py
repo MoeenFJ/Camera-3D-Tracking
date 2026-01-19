@@ -2,6 +2,7 @@ import socket
 import threading
 import struct
 import time
+import numpy as np
 class Node:
     
     PACKET_SIZE = 32
@@ -15,7 +16,7 @@ class Node:
         self.acc = ()
         self.rot = ()
         self.connected = False
-        self.pos = (0.0,0.0,0.0)
+        self.pos = np.zeros((1,3))
         
         self.mac = mac
         self.name = name
@@ -58,6 +59,7 @@ class NodeManager:
         self.sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
         self.sock.bind(("",self.port))
         self.managerThread = threading.Thread(target=self.manage_nodes)
+        self.managerThread.daemon = False
         self.managerThread.start()
     def manage_nodes(self):
         while True:

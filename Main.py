@@ -1,5 +1,6 @@
 from NodeManager import NodeManager
 from Camera import PS3EyeCamera
+from Visualizer import Visualizer
 import random
 import cv2
 import os
@@ -7,6 +8,10 @@ from pathlib import Path
 import glob
 import numpy as np
 import time
+import socket
+import threading
+import struct
+import queue
 
 
 mtx = np.array([[554.2563,   0,          320],
@@ -39,11 +44,55 @@ for camPath in glob.glob(CAMDIR):
     cameras[-1].inMatrix = mtx
     cameras[-1].distortCoeff = dist
     i += 1
+    
+    
+#assert len(cameras) >= 2
+
+def update_visualizer_thread():
+    global cameras,manager
+    nodes = manager.nodes
+    sock = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1",50406))
+    print("Ready")
+    sock.listen(5)
+    connection, _ = sock.accept()
+    print("accepted")
+    while(True):
+        try:
+            for i in range(len(cameras)):
+                cam = cameras[i]
+                t = cam.t.reshape((-1))
+                
+                data = struct.pack("Bfff",i,float(t[0]),float(t[1]),float(t[2]))
+                print(data)
+                connection.send(data)
+            for i, key in enumerate(nodes):
+                node = nodes[key]
+                pos = node.pos.reshape((-1))
+                data = struct.pack("BfffBBB",128+i,float(pos[0]),float(pos[1]),float(pos[2]),node.color[0],node.color[1],node.color[2])
+                print(data)
+                connection.send(data)
+            time.sleep(0.5)
+        except:
+            connection, _ = sock.accept()
+            print("accepted")
+
+
+vis_queue = queue.Queue()
+vis = Visualizer(vis_queue)
+
 
 # This will later be replaced with a button click saying "Done adding".
 while len(manager.nodes) < 1:
     pass
 
+cams_to_send = []
+nodes_to_send = []
+for cam in cameras:
+    cams_to_send.append([cam.t.reshape((-1))])
+for key,node in manager.nodes.items():
+    nodes_to_send.append([node.pos.reshape((-1)),node.color])
+vis_queue.put((cams_to_send,nodes_to_send))
 
 def RGBtoBGR(color):
     return (color[2], color[1], color[0])
@@ -216,6 +265,7 @@ print("Calibration done!")
 for cam in cameras:
     print(f"{cam.name} : {cam.t} : {cam.R}")
 
+
 while True:
     for cam in cameras:
         cam.readFrame()
@@ -260,16 +310,23 @@ while True:
 
                     # p1_u = cv2.undistortPoints(p1, cam.inMatrix, cam.distortCoeff, P=cam.inMatrix)
                     # p2_u = cv2.undistortPoints(p2, otherCam.inMatrix, otherCam.distortCoeff, P=otherCam.inMatrix)
-                    print(
-                        f"Located at {loc} in cam {cam.name} and at {otherLoc} in cam {otherCam.name}")
+                    #print(f"Located at {loc} in cam {cam.name} and at {otherLoc} in cam {otherCam.name}")
                     point3D = cv2.triangulatePoints(
                         cam.projectionMatrix, otherCam.projectionMatrix, p1.reshape(2, 1), p2.reshape(2, 1))
                     point3D = point3D / point3D[3]
-                    print("Point in da third dimansion : ", point3D)
-                    print(f"{cam.name} Project : {cam.projectionMatrix}")
+                    #print("Point in da third dimansion : ", point3D)
+                    #print(f"{cam.name} Project : {cam.projectionMatrix}")
                     estimatedPoses.append(point3D[:3].reshape(3))
             estimatedPoses = np.array(estimatedPoses)
             finalPos = np.mean(estimatedPoses, axis=0)
             node.pos = finalPos
-            print(f"Node {node.name} estimated at {finalPos}")
+            #print(f"Node {node.name} estimated at {finalPos}")
     # break
+    cams_to_send = []
+    nodes_to_send = []
+    for cam in cameras:
+        cams_to_send.append([cam.t.reshape((-1))])
+    for key,node in manager.nodes.items():
+        nodes_to_send.append([node.pos.reshape((-1)),node.color])
+    vis_queue.put((cams_to_send,nodes_to_send))
+
