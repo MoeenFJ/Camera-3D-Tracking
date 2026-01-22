@@ -181,9 +181,17 @@ for i in range(8):
             all_see = True
             for cam in cameras:
                 col = RGBtoBGR(node.color)
-                f, l, c = cam.getNodeInCamSpace(col)
+                f, l, c, debugImg = cam.getNodeInCamSpace(col)
+                timg = debugImg.copy()
+                #cv2.drawContours(timg, [c], 0, (0, 255, 0), 3)
+                #cv2.circle(timg,(l[0],l[1]), 2, (0,255,0), -1)
+                cv2.namedWindow(f"Cam {cam.name} found color {node.color}", cv2.WINDOW_NORMAL)
+                cv2.resizeWindow(f"Cam {cam.name} found color {node.color}", 640, 480)
+                cv2.imshow(f"Cam {cam.name} found color {node.color}", timg)
+                cv2.waitKey(1)
                 print(
                     f"Cam {cam.name} sees Node {node.name} at {l}, found: {f}")
+                
                 if not f:
                     all_see = False
                 points[cam.name] = l
@@ -274,9 +282,13 @@ while True:
         img = cam.savedFrame
         for _, node in manager.nodes.items():
             col = RGBtoBGR(node.color)
-            f, l, c = cam.getNodeInCamSpace(col)
+            f, l, c,_ = cam.getNodeInCamSpace(col)
             timg = img.copy()
-            cv2.drawContours(timg, [c], 0, (0, 255, 0), 3)
+            if(f):
+                cv2.drawContours(timg, [c], 0, (0, 255, 0), 3)
+                cv2.circle(timg,(int(l[0]),int(l[1])), 2, (0,255,0), -1)
+            cv2.namedWindow(f"Cam {cam.name} found color {node.color}", cv2.WINDOW_NORMAL)
+            cv2.resizeWindow(f"Cam {cam.name} found color {node.color}", 640, 480)
             cv2.imshow(f"Cam {cam.name} found color {node.color}", timg)
             cv2.waitKey(1)
 
@@ -284,7 +296,7 @@ while True:
         col = RGBtoBGR(node.color)
         detects = {}
         for cam in cameras:
-            f, l, c = cam.getNodeInCamSpace(col)
+            f, l, c,_ = cam.getNodeInCamSpace(col)
             if f:
                 detects[cam] = l
         if len(detects) >= 2:

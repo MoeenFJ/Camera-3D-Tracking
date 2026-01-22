@@ -148,6 +148,73 @@ class Camera:
                 
         return found,np.array([cx,cy]),cont
         
+    def findTrackerByColor(self,color):
+        found = False
+        x = None
+        y = None
+        cont = None
+        
+        blured_image = cv2.medianBlur(self.savedFrame, 5)
+        
+        blured_image = blured_image.astype(np.float32)
+
+
+        ## TODO : HSV color matching is vibe coded but works, have to verify later.
+        target_bgr = np.uint8([[color]]) 
+        hsv_s_uint = cv2.cvtColor(target_bgr, cv2.COLOR_BGR2HSV)[0][0]
+        target_h = hsv_s_uint[0] / 179.0  
+        target_s = hsv_s_uint[1] / 255.0
+        target_v = hsv_s_uint[2] / 255.0
+
+
+        float_img = blured_image.astype(np.float32) / 255.0
+        hsv_image = cv2.cvtColor(float_img, cv2.COLOR_BGR2HSV)
+
+        h_img = hsv_image[:, :, 0] / 360.0 
+        s_img = hsv_image[:, :, 1]
+        v_img = hsv_image[:, :, 2]
+
+        
+        dist_h = np.abs(h_img - target_h)
+        hue_sim = 1.0 - np.minimum(dist_h, 1.0 - dist_h) * 2.0 
+        hue_sim = np.clip(hue_sim, 0, 1) 
+
+
+        s_sim = 1.0 - np.abs(s_img - target_s)
+        v_sim = 1.0 - np.abs(v_img - target_v)
+
+        similarity_map = hue_sim * s_sim * v_sim
+
+        gray_result = (similarity_map * 255).astype(np.uint8)
+        ret, threshed = cv2.threshold(gray_result, 180, 255, cv2.THRESH_BINARY)
+
+        contours, _ = cv2.findContours(threshed, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
+
+        def _contourValue(cnt):
+            return self.getAverageInContour(gray_result,cnt)[0]
+        
+        ## TODO : Currently the contourArea fucntion used can give wrong results specially if the contour is a line or self intesecting.
+        contours = [cnt for cnt in contours if cv2.contourArea(cnt) > self.MIN_CONTOUR_AREA]
+        
+        ## TODO : CUTOFF HERE INSTEAD OF SORTING
+        contours = sorted(contours, key=_contourValue)
+
+        if len(contours) > 0:
+            cont = contours[-1]
+            
+            area = cv2.contourArea(cont)
+            if area > 0:
+                found = True
+                ## TODO : This works way better than contour center, have to check cirularity too!!
+                (x, y), radius = cv2.minEnclosingCircle(cont)
+            else:
+                cont = None
+                
+        
+        
+                
+        return found,np.array([x,y]),cont,similarity_map
+       
     def calibrateColor(self,color):
         f,c,cnt = self.getBrightestContour()
         assert f is not False, f"A cam couldnt fine the node! : {self.name}"
@@ -162,7 +229,7 @@ class Camera:
         
     def getNodeInCamSpace(self,color):
         _color = self.colorMap[color]
-        return self.getContourByColor(_color)
+        return self.findTrackerByColor(_color)
 
     def saveframe(self,loc):
         cv2.imwrite(loc,self.savedFrame)
