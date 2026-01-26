@@ -16,7 +16,7 @@ class Node:
         self.acc = ()
         self.rot = ()
         self.connected = False
-        self.pos = np.zeros((1,3))
+        self.pos = np.zeros((4))
         
         self.mac = mac
         self.name = name
@@ -27,6 +27,8 @@ class Node:
         self.sock.connect((addr[0],50405))
         self.sendToManager(bytearray([0x03]))
         self.light_on()
+        #time.sleep(1)
+        #self.gyro_on()
 
         
     def set_color(self,color):
@@ -43,6 +45,9 @@ class Node:
         rem = Node.PACKET_SIZE - (len(data) % Node.PACKET_SIZE)
         data += bytearray([0x00]*rem)
         self.sock.send(data)
+        
+    def gyro_on(self):
+        self.sendToManager(bytearray([0x01]))
 
     
 class NodeManager:

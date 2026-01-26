@@ -8,7 +8,7 @@ class Camera:
     ## TODO : Calculate this based on resolution
     MIN_CONTOUR_AREA = 100
     
-    def __init__(self,name,path):
+    def __init__(self,name,path,nodes):
         self.name = ""
         self.path = ""
         self.cap = None
@@ -29,17 +29,30 @@ class Camera:
         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         self.path = path
         
-        self.thread = threading.Thread(target=self._update, args=())
+        self.nodeLocations = {}
+        self.nodes = nodes
+        
+        self.thread = threading.Thread(target=self._updateFrame, args=())
         self.thread.daemon = False 
         self.thread.start()
         
-    def _update(self):
+    def _updateFrame(self):
         # Constantly grab frames to clear the buffer
         while True:
             ret, frame = self.cap.read()
             if ret:
                 self.frame = frame
                 
+    def _trackTrackers(self):
+        
+        while True:
+            self.nodeLocations = {}
+            for node in self.nodes:
+                f, l, c,_ = self.getNodeInCamSpace(node)
+                if f:
+                    self.nodeLocations[node.id] = l
+                    
+        
     def readFrame(self):
         self.savedFrame = self.frame.copy()
 
@@ -227,8 +240,8 @@ class Camera:
         else:
             return None
         
-    def getNodeInCamSpace(self,color):
-        _color = self.colorMap[color]
+    def getNodeInCamSpace(self,node):
+        _color = self.colorMap[node.color]
         return self.findTrackerByColor(_color)
 
     def saveframe(self,loc):

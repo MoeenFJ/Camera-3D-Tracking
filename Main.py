@@ -12,7 +12,7 @@ import socket
 import threading
 import struct
 import queue
-
+from scipy.optimize import least_squares
 
 mtx = np.array([[554.2563,   0,          320],
                 [0,        554.2563,      240],
@@ -20,7 +20,7 @@ mtx = np.array([[554.2563,   0,          320],
 dist = np.array([[-0.10771770030260086, 0.1213262677192688,
                 0.00091733073350042105, 0.00010589254816295579]], dtype="double")
 
-
+DEBUG_MODE = True
 # Program Flow:
 # 1. Add all trackers and calibration boards and Cameras
 # 2. Choose Calibration method
@@ -91,7 +91,7 @@ nodes_to_send = []
 for cam in cameras:
     cams_to_send.append([cam.t.reshape((-1))])
 for key,node in manager.nodes.items():
-    nodes_to_send.append([node.pos.reshape((-1)),node.color])
+    nodes_to_send.append([node.pos[:3].reshape((-1)),node.color])
 vis_queue.put((cams_to_send,nodes_to_send))
 
 def RGBtoBGR(color):
@@ -274,31 +274,41 @@ for cam in cameras:
     print(f"{cam.name} : {cam.t} : {cam.R}")
 
 
+
+def bundle_adjustment_fun(params, n_cameras, n_points, points_2d, K):
+    # Unpack params
+    camera_params = params[:n_cameras * 12].reshape((n_cameras, 3,4))
+    points_3d = params[n_cameras * 12:].reshape((n_points, 4))
+    
+    print(f"camera_params : {camera_params}")
+    print(f"points_3d : {points_3d}")
+    
+    # Project
+    projmats = (K @ camera_params)
+    
+    print(f"projmats : {projmats}") 
+    
+    errors = []
+    for i in range(n_points):
+        reproj = (projmats @ points_3d[i])[:,:2] - points_2d[i]
+        errors.append(reproj.ravel())
+   
+    # Return the difference (residuals)
+    return np.array(errors).ravel()
+
 while True:
     for cam in cameras:
         cam.readFrame()
 
-    for cam in cameras:
-        img = cam.savedFrame
-        for _, node in manager.nodes.items():
-            col = RGBtoBGR(node.color)
-            f, l, c,_ = cam.getNodeInCamSpace(col)
-            timg = img.copy()
-            if(f):
-                cv2.drawContours(timg, [c], 0, (0, 255, 0), 3)
-                cv2.circle(timg,(int(l[0]),int(l[1])), 2, (0,255,0), -1)
-            cv2.namedWindow(f"Cam {cam.name} found color {node.color}", cv2.WINDOW_NORMAL)
-            cv2.resizeWindow(f"Cam {cam.name} found color {node.color}", 640, 480)
-            cv2.imshow(f"Cam {cam.name} found color {node.color}", timg)
-            cv2.waitKey(1)
-
+    
+    detects = {}
     for _, node in manager.nodes.items():
         col = RGBtoBGR(node.color)
-        detects = {}
+        detects[node] = {}
         for cam in cameras:
             f, l, c,_ = cam.getNodeInCamSpace(col)
             if f:
-                detects[cam] = l
+                detects[node][cam] = l
         if len(detects) >= 2:
             estimatedPoses = []
             for cam, loc in detects.items():
@@ -328,17 +338,56 @@ while True:
                     point3D = point3D / point3D[3]
                     #print("Point in da third dimansion : ", point3D)
                     #print(f"{cam.name} Project : {cam.projectionMatrix}")
-                    estimatedPoses.append(point3D[:3].reshape(3))
+                    estimatedPoses.append(point3D.reshape(4))
             estimatedPoses = np.array(estimatedPoses)
             finalPos = np.mean(estimatedPoses, axis=0)
             node.pos = finalPos
             #print(f"Node {node.name} estimated at {finalPos}")
+
+    observed_2d = []
+    x0 =  np.array([])
+    for cam in cameras:
+        x0 = np.hstack((x0,np.hstack((cam.R, cam.t)).ravel()))
+        
+    for _, node in manager.nodes.items():
+        x0 = np.hstack((x0,node.pos.ravel()))
+    print(x0)
+    
+    for _, node in manager.nodes.items():
+        
+        temp_arr = np.array([])
+        for cam in cameras:
+             temp_arr = np.append(temp_arr,(np.array(detects[node][cam])))
+        observed_2d.append(temp_arr) 
+    print(observed_2d)
+    res = least_squares(bundle_adjustment_fun, x0, verbose=2, x_scale='jac', ftol=1e-4, method='trf',
+                        args=(len(cameras), len(manager.nodes.items()), np.array(observed_2d), mtx))
+    print(res)
+            
+    if DEBUG_MODE:    
+        for cam in cameras:
+            img = cam.savedFrame
+            for _, node in manager.nodes.items():
+                col = RGBtoBGR(node.color)
+                f, l, c,_ = cam.getNodeInCamSpace(col)
+                timg = img.copy()
+                reprojected_point =  cam.projectionMatrix @ node.pos 
+                projection_error = np.array(l) - reprojected_point[:2]
+                least_squares()
+                if(f):
+                    cv2.drawContours(timg, [c], 0, (0, 255, 0), 3)
+                    cv2.circle(timg,(int(l[0]),int(l[1])), 2, (0,255,0), -1)
+                    cv2.circle(timg,(int(reprojected_point[0]),int(reprojected_point[1])),2,(0,0,255),-1)
+                cv2.namedWindow(f"Cam {cam.name} found color {node.color}", cv2.WINDOW_NORMAL)
+                cv2.resizeWindow(f"Cam {cam.name} found color {node.color}", 640, 480)
+                cv2.imshow(f"Cam {cam.name} found color {node.color}", timg)
+                cv2.waitKey(1)
     # break
     cams_to_send = []
     nodes_to_send = []
     for cam in cameras:
         cams_to_send.append([cam.t.reshape((-1))])
     for key,node in manager.nodes.items():
-        nodes_to_send.append([node.pos.reshape((-1)),node.color])
+        nodes_to_send.append([node.pos[:3].reshape((-1)),node.color])
     vis_queue.put((cams_to_send,nodes_to_send))
 
