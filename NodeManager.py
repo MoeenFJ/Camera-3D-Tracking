@@ -18,7 +18,7 @@ class Node:
         self.acc = ()
         self.rot = ()
         self.connected = False
-        self.pos = np.zeros((4))
+        self.pos = np.zeros((3))
         self.lock = Lock()
 
         self.mac = mac

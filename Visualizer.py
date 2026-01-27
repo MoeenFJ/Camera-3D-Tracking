@@ -97,7 +97,7 @@ class Visualizer:
         for cam in self.cams:
             glPushMatrix()
             glTranslatef(*cam[0]) 
-            glutSolidCube(0.2) 
+            glutSolidCube(0.1) 
             glPopMatrix()
 
 

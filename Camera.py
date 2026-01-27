@@ -56,7 +56,8 @@ class Camera:
         for node in self.node_manager.nodes:
             f, l, c,_ = self.getNodeInCamSpace(node)
             if f:
-                self.nodeLocations[node.id] = l
+                p1_u = cv2.undistortPoints(l, self.inMatrix, self.distortCoeff, P=self.inMatrix)[0][0]
+                self.nodeLocations[node.id] = p1_u
                     
         
     def readFrame(self):
