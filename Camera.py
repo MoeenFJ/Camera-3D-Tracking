@@ -8,11 +8,10 @@ class Camera:
     ## TODO : Calculate this based on resolution
     MIN_CONTOUR_AREA = 100
     
-    def __init__(self,name,path,nodes):
+    def __init__(self,name,path,node_manager):
         self.name = ""
         self.path = ""
         self.cap = None
-        self.extMat = np.zeros((3,4))
         self.t = np.zeros((1,3))
         self.R = np.zeros((3,3))
         
@@ -24,17 +23,26 @@ class Camera:
         self.savedFrame = None
         self.colorMap = {}
         
+        self.node_manager = node_manager
         self.name = name
         self.cap = cv2.VideoCapture(path,cv2.CAP_V4L2)
         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         self.path = path
         
         self.nodeLocations = {}
-        self.nodes = nodes
         
         self.thread = threading.Thread(target=self._updateFrame, args=())
         self.thread.daemon = False 
         self.thread.start()
+        
+    def set_t(self,t):
+        self.t  = t
+        self.projectionMatrix = self.inMatrix @ np.hstack((self.R,self.t))
+        
+    def set_R(self,R):
+        self.R  = R
+        self.projectionMatrix = self.inMatrix @ np.hstack((self.R,self.t))
+        
         
     def _updateFrame(self):
         # Constantly grab frames to clear the buffer
@@ -43,14 +51,12 @@ class Camera:
             if ret:
                 self.frame = frame
                 
-    def _trackTrackers(self):
-        
-        while True:
-            self.nodeLocations = {}
-            for node in self.nodes:
-                f, l, c,_ = self.getNodeInCamSpace(node)
-                if f:
-                    self.nodeLocations[node.id] = l
+    def processFrame(self):
+        self.nodeLocations = {}
+        for node in self.node_manager.nodes:
+            f, l, c,_ = self.getNodeInCamSpace(node)
+            if f:
+                self.nodeLocations[node.id] = l
                     
         
     def readFrame(self):
@@ -228,12 +234,12 @@ class Camera:
                 
         return found,np.array([x,y]),cont,similarity_map
        
-    def calibrateColor(self,color):
+    def calibrateColor(self,node):
         f,c,cnt = self.getBrightestContour()
         assert f is not False, f"A cam couldnt fine the node! : {self.name}"
         observedColor = self.savedFrame[c[1],c[0]]
         if f:
-            self.colorMap[color] = observedColor
+            self.colorMap[node.id] = observedColor
 
 
             return observedColor,cnt
@@ -241,10 +247,10 @@ class Camera:
             return None
         
     def getNodeInCamSpace(self,node):
-        _color = self.colorMap[node.color]
+        _color = self.colorMap[node.id]
         return self.findTrackerByColor(_color)
 
-    def saveframe(self,loc):
+    def saveFrame(self,loc):
         cv2.imwrite(loc,self.savedFrame)
 
 class PS3EyeCamera(Camera):
