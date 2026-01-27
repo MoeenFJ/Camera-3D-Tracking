@@ -12,15 +12,19 @@ import socket
 import threading
 import struct
 import queue
+from scipy.optimize import least_squares
 
-
-mtx = np.array([[554.2563,   0,          320],
-                [0,        554.2563,      240],
-                [0,          0,           1,]])
-dist = np.array([[-0.10771770030260086, 0.1213262677192688,
-                0.00091733073350042105, 0.00010589254816295579]], dtype="double")
-
-
+# mtx = np.array([[554.2563,   0,          320],
+#                 [0,        554.2563,      240],
+#                 [0,          0,           1,]])
+# dist = np.array([[-0.10771770030260086, 0.1213262677192688,
+#                 0.00091733073350042105, 0.00010589254816295579]], dtype="double")
+mtx = np.array([[580,   0,          320],
+                 [0,        580,      240],
+                 [0,          0,           1,]])
+dist = np.array([[-0.21, 0.06,
+                0.0, 0.0]], dtype="double")
+DEBUG_MODE = True
 # Program Flow:
 # 1. Add all trackers and calibration boards and Cameras
 # 2. Choose Calibration method
@@ -30,7 +34,14 @@ dist = np.array([[-0.10771770030260086, 0.1213262677192688,
 # First order of bussiness, color calibration
 
 # Step 1
-manager = NodeManager()
+node_manager = NodeManager()
+
+
+# This will later be replaced with a button click saying "Done adding".
+while len(node_manager.nodes) < 1:
+    pass
+
+node_manager.stop_accepting()
 
 cameras = []
 i = 0
@@ -39,81 +50,45 @@ CAMDIR = "/dev/v4l/by-path/pci-0000:00:14.0-usbv2-*"
 
 for camPath in glob.glob(CAMDIR):
     print(camPath)
-    cameras.append(PS3EyeCamera(str(i), camPath))
+    cameras.append(PS3EyeCamera(str(i), camPath, node_manager))
     cameras[-1].trackSettings()
     cameras[-1].inMatrix = mtx
     cameras[-1].distortCoeff = dist
     i += 1
-    
-    
-#assert len(cameras) >= 2
 
-def update_visualizer_thread():
-    global cameras,manager
-    nodes = manager.nodes
-    sock = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-    sock.bind(("127.0.0.1",50406))
-    print("Ready")
-    sock.listen(5)
-    connection, _ = sock.accept()
-    print("accepted")
-    while(True):
-        try:
-            for i in range(len(cameras)):
-                cam = cameras[i]
-                t = cam.t.reshape((-1))
-                
-                data = struct.pack("Bfff",i,float(t[0]),float(t[1]),float(t[2]))
-                print(data)
-                connection.send(data)
-            for i, key in enumerate(nodes):
-                node = nodes[key]
-                pos = node.pos.reshape((-1))
-                data = struct.pack("BfffBBB",128+i,float(pos[0]),float(pos[1]),float(pos[2]),node.color[0],node.color[1],node.color[2])
-                print(data)
-                connection.send(data)
-            time.sleep(0.5)
-        except:
-            connection, _ = sock.accept()
-            print("accepted")
+# assert len(cameras) >= 2
 
 
 vis_queue = queue.Queue()
 vis = Visualizer(vis_queue)
 
 
-# This will later be replaced with a button click saying "Done adding".
-while len(manager.nodes) < 1:
-    pass
-
 cams_to_send = []
 nodes_to_send = []
 for cam in cameras:
     cams_to_send.append([cam.t.reshape((-1))])
-for key,node in manager.nodes.items():
-    nodes_to_send.append([node.pos.reshape((-1)),node.color])
-vis_queue.put((cams_to_send,nodes_to_send))
+for node in node_manager.nodes:
+    nodes_to_send.append([node.pos[:3].reshape((-1)), node.color])
+vis_queue.put((cams_to_send, nodes_to_send))
 
-def RGBtoBGR(color):
-    return (color[2], color[1], color[0])
 
 
 # TODO : This should   be changed such that:
 # 1.It considers the average color in contour instead of the center
 # 2.It considers the average color in a series of frames
 # 3.It calculates a 3D margin of error plus 5% more error of error.
-time.sleep(2)
 
 
 def colorCalibration():
     calDataPath = Path("./CapturedCalData/")
     calDataPath.mkdir(parents=True, exist_ok=True)
-    for _, node in manager.nodes.items():
+
+    for node in node_manager.nodes:
         nodeCalDataPath = Path(f"./CapturedCalData/{node.color}/")
         nodeCalDataPath.mkdir(parents=True, exist_ok=True)
         node.light_on()
         print(node.name)
-        for _, otherNode in manager.nodes.items():
+        for otherNode in node_manager.nodes:
             if node is otherNode:
                 continue
             otherNode.light_off()
@@ -122,14 +97,13 @@ def colorCalibration():
         for cam in cameras:
             cam.readFrame()
         for cam in cameras:
-            col = RGBtoBGR(node.color)
-            obsCol, cnt = cam.calibrateColor(col)
+            obsCol, cnt = cam.calibrateColor(node)
             print(f"Cam {cam.name} observed {node.color} as {obsCol}.")
             timg = cam.frame.copy()
             cv2.drawContours(timg, [cnt], -1, (0, 255, 0), 3)
             cv2.imwrite(f"./CapturedCalData/{node.color}/{cam.name}.png", timg)
     print("Done color cap")
-    for _, node in manager.nodes.items():
+    for node in node_manager.nodes:
         node.light_on()
 
 
@@ -140,20 +114,7 @@ colorCalibration()
 # assert calMethod in [1,2]
 
 
-# Below is getContourByColor Test code
-# while True:
-#    for cam in cameras:
-#           cam.readFrame()
-#    for cam in cameras:
-#        img = cam.savedFrame
-#        for _,node in manager.nodes.items():
-#            col = RGBtoBGR(node.color)
-#            f, l, c = cam.getNodeInCamSpace(col)
-#            timg = img.copy()
-#            cv2.drawContours(timg, [c], 0, (0,255,0), 3)
-#            cv2.imshow(f"Cam {cam.name} found color {node.color}",timg)
-#            cv2.waitKey(1)
-#
+
 
 
 # Let's try template-less calibration first.
@@ -172,29 +133,34 @@ for i in range(8):
     time.sleep(1)
     for cam in cameras:
         cam.readFrame()
-    for _, node in manager.nodes.items():
+    for node in node_manager.nodes:
         points = {}
         all_see = False
         while not all_see:
             for cam in cameras:
                 cam.readFrame()
+            for cam in cameras:
+                cam.processFrame()
             all_see = True
             for cam in cameras:
-                col = RGBtoBGR(node.color)
-                f, l, c, debugImg = cam.getNodeInCamSpace(col)
-                timg = debugImg.copy()
-                #cv2.drawContours(timg, [c], 0, (0, 255, 0), 3)
-                #cv2.circle(timg,(l[0],l[1]), 2, (0,255,0), -1)
-                cv2.namedWindow(f"Cam {cam.name} found color {node.color}", cv2.WINDOW_NORMAL)
-                cv2.resizeWindow(f"Cam {cam.name} found color {node.color}", 640, 480)
+                timg = cam.savedFrame.copy()
+ 
+                cv2.namedWindow(
+                    f"Cam {cam.name} found color {node.color}", cv2.WINDOW_NORMAL)
+                cv2.resizeWindow(
+                    f"Cam {cam.name} found color {node.color}", 640, 480)
                 cv2.imshow(f"Cam {cam.name} found color {node.color}", timg)
                 cv2.waitKey(1)
-                print(
-                    f"Cam {cam.name} sees Node {node.name} at {l}, found: {f}")
                 
-                if not f:
+
+                if node.id in cam.nodeLocations:
+                    l = cam.nodeLocations[node.id]
+                    points[cam.name] = l
+                    print(
+                        f"Cam {cam.name} sees Node {node.name} at {l}, found")
+                else:
                     all_see = False
-                points[cam.name] = l
+                
             if all_see:
                 cam_calibration_data.append(points)
 
@@ -222,18 +188,21 @@ for data in cam_calibration_data:
 
 pts1 = np.array(pts1, dtype=np.float32)
 pts2 = np.array(pts2, dtype=np.float32)
-#pts1 = cv2.undistortPoints(pts1.reshape(-1, 1, 2),
-#                           cam1.inMatrix, cam1.distortCoeff, P=cam1.inMatrix)
-#pts2 = cv2.undistortPoints(pts2.reshape(-1, 1, 2),
-#                           cam2.inMatrix, cam2.distortCoeff, P=cam2.inMatrix)
+#pts1 = cv2.undistortPoints(pts1.reshape((-1, 1, 2)),
+#                          cam1.inMatrix, cam1.distortCoeff, P=cam1.inMatrix)
+#pts2 = cv2.undistortPoints(pts2.reshape((-1, 1, 2)),
+#                          cam2.inMatrix, cam2.distortCoeff, P=cam2.inMatrix)
 
 
 E, mask = cv2.findEssentialMat(
     pts1, pts2, cam1.inMatrix, method=cv2.RANSAC, prob=0.999, threshold=1.0)
 _, R, t, mask = cv2.recoverPose(E, pts1, pts2, cam1.inMatrix)
 
-cam2.R = R  
-cam2.t = t  
+cam2.R = R
+cam2.t = t
+print(R)
+print(t)
+print("************************************88")
 
 
 # Now let's triangulate all points to get their 3D locations
@@ -264,8 +233,8 @@ for cam in cameras[2:]:
     ret, rvec, tvec = cv2.solvePnP(
         objectPoints, imagePoints, cam.inMatrix, cam.distortCoeff)
     R, _ = cv2.Rodrigues(rvec)
-    cam.R = R  
-    cam.t = tvec  
+    cam.R = R
+    cam.t = tvec
     print()
     cam.projectionMatrix = cam.inMatrix @ np.hstack((cam.R, cam.t))
 
@@ -274,71 +243,176 @@ for cam in cameras:
     print(f"{cam.name} : {cam.t} : {cam.R}")
 
 
+def bundle_adjustment_fun(params, cameras, bundle_adjustment_data):
+    # Unpack params
+    n_cameras = len(cameras)-1
+    n_points = len(bundle_adjustment_data)
+    camera_params = params[:n_cameras * 12].reshape((n_cameras, 3, 4))
+    points_3d = params[n_cameras * 12:].reshape((n_points, 3))
+    points_3d = np.hstack((points_3d,np.ones((n_points,1))))
+    # print(f"camera_params : {camera_params}")
+    # print(f"points_3d : {points_3d}")
+    errors = []
+    projmat = cameras[0].projectionMatrix
+    for i in range(n_points):
+        points_2d = bundle_adjustment_data[i]
+        
+        if cameras[0].name not in points_2d:
+            continue
+        
+        reprojected_point = (projmat @ points_3d[i])
+        reprojected_point = reprojected_point / reprojected_point[2]
+        reproj = reprojected_point[:2] - points_2d[cameras[0].name]
+
+        errors.append(reproj.ravel())
+
+    for i in range(n_cameras):
+        
+        projmat = (cameras[i+1].inMatrix @ camera_params[i])
+
+        # print(f"projmats : {projmats}")
+
+        for j in range(n_points):
+            points_2d = bundle_adjustment_data[j]
+            
+            if cameras[i].name not in points_2d:
+                continue
+            
+            reprojected_point = (projmat @ points_3d[i])
+            reprojected_point = reprojected_point / reprojected_point[2]
+            reproj = reprojected_point[:2] - points_2d[cameras[i].name]
+
+            print(f"reproj {reproj} : {reprojected_point} and {points_2d[cameras[i].name]}")
+            errors.append(reproj.ravel())
+
+    # Return the difference (residuals)
+    return np.array(errors).ravel()
+
+
+bundle_adjustment = False
+frameCnt = 1
+bundle_adjustment_data_2dpoints = []
+bundle_adjustment_data_3dpoints = []
 while True:
     for cam in cameras:
         cam.readFrame()
 
     for cam in cameras:
-        img = cam.savedFrame
-        for _, node in manager.nodes.items():
-            col = RGBtoBGR(node.color)
-            f, l, c,_ = cam.getNodeInCamSpace(col)
-            timg = img.copy()
-            if(f):
-                cv2.drawContours(timg, [c], 0, (0, 255, 0), 3)
-                cv2.circle(timg,(int(l[0]),int(l[1])), 2, (0,255,0), -1)
-            cv2.namedWindow(f"Cam {cam.name} found color {node.color}", cv2.WINDOW_NORMAL)
-            cv2.resizeWindow(f"Cam {cam.name} found color {node.color}", 640, 480)
-            cv2.imshow(f"Cam {cam.name} found color {node.color}", timg)
-            cv2.waitKey(1)
+        cam.processFrame()
 
-    for _, node in manager.nodes.items():
-        col = RGBtoBGR(node.color)
-        detects = {}
+    for node in node_manager.nodes:
+        estimatedPoses = []
         for cam in cameras:
-            f, l, c,_ = cam.getNodeInCamSpace(col)
-            if f:
-                detects[cam] = l
-        if len(detects) >= 2:
-            estimatedPoses = []
-            for cam, loc in detects.items():
-                for otherCam, otherLoc in detects.items():
-                    if cam is otherCam:
-                        continue
+            for otherCam in cameras:
+                if cam is otherCam:
+                    continue
+                if node.id not in cam.nodeLocations or node.id not in otherCam.nodeLocations:
+                    continue
+                loc = cam.nodeLocations[node.id]
+                otherLoc = cam.nodeLocations[node.id]
 
-                    p1 = np.array([loc], dtype=np.float32).reshape(-1, 1, 2)
-                    p2 = np.array(
-                        [otherLoc], dtype=np.float32).reshape(-1, 1, 2)
+                p1 = np.array([loc], dtype=np.float32).reshape((-1, 1, 2))
+                p2 = np.array(
+                    [otherLoc], dtype=np.float32).reshape((-1, 1, 2))
 
-                    # Problem : Strange behaviour according to StackOverflow, the undistortPoints does something to the points regarding
-                    # the intrinsic matrix that the triangulatePoints function doesnt expect it to do.
-                    # It apperantly nomalizes the intrinsic matrix while undistorting, so the resulting points assume an
-                    # Identity intrinsic matrix.
-                    # Solution 1 : For the time being the original un-undistorted points are give to triangulatePoints
-                    # Solution 2 : User suggests doing the undistortion and preforming tirangulation using a projection matrix that uses an identity matrix as
-                    # its intrinsic matix.
-                    # Solution 3: user says by passing the projection matrix(or the intrinsicMatrix, not sure which) as the P parameter to the undistortPoints function,
-                    # the undistorted points can be used as normanl
+                # Problem : Strange behaviour according to StackOverflow, the undistortPoints does something to the points regarding
+                # the intrinsic matrix that the triangulatePoints function doesnt expect it to do.
+                # It apperantly nomalizes the intrinsic matrix while undistorting, so the resulting points assume an
+                # Identity intrinsic matrix.
+                # Solution 1 : For the time being the original un-undistorted points are give to triangulatePoints
+                # Solution 2 : User suggests doing the undistortion and preforming tirangulation using a projection matrix that uses an identity matrix as
+                # its intrinsic matix.
+                # Solution 3: user says by passing the projection matrix(or the intrinsicMatrix, not sure which) as the P parameter to the undistortPoints function,
+                # the undistorted points can be used as normanl
 
-                    # p1_u = cv2.undistortPoints(p1, cam.inMatrix, cam.distortCoeff, P=cam.inMatrix)
-                    # p2_u = cv2.undistortPoints(p2, otherCam.inMatrix, otherCam.distortCoeff, P=otherCam.inMatrix)
-                    #print(f"Located at {loc} in cam {cam.name} and at {otherLoc} in cam {otherCam.name}")
-                    point3D = cv2.triangulatePoints(
-                        cam.projectionMatrix, otherCam.projectionMatrix, p1.reshape(2, 1), p2.reshape(2, 1))
-                    point3D = point3D / point3D[3]
-                    #print("Point in da third dimansion : ", point3D)
-                    #print(f"{cam.name} Project : {cam.projectionMatrix}")
-                    estimatedPoses.append(point3D[:3].reshape(3))
+                #p1_u = cv2.undistortPoints(p1, cam.inMatrix, cam.distortCoeff, P=cam.inMatrix)
+                #p2_u = cv2.undistortPoints(p2, otherCam.inMatrix, otherCam.distortCoeff, P=otherCam.inMatrix)
+                # print(f"Located at {loc} in cam {cam.name} and at {otherLoc} in cam {otherCam.name}")
+                point3D = cv2.triangulatePoints(
+                    cam.projectionMatrix, otherCam.projectionMatrix, p1.reshape(2, 1), p2.reshape(2, 1))
+                point3D = point3D / point3D[3]
+                # print("Point in da third dimansion : ", point3D)
+                # print(f"{cam.name} Project : {cam.projectionMatrix}")
+                estimatedPoses.append(point3D.reshape(4)[:3])
+        if len(estimatedPoses) > 0:
             estimatedPoses = np.array(estimatedPoses)
             finalPos = np.mean(estimatedPoses, axis=0)
-            node.pos = finalPos
-            #print(f"Node {node.name} estimated at {finalPos}")
-    # break
+            node.set_pos(finalPos)
+            # print(f"Node {node.name} estimated at {finalPos}")
+
+    if frameCnt % 300 == 0:
+        bundle_adjustment = True
+
+    if frameCnt % 15 == 0:
+
+        for i in range(len(node_manager.nodes)):
+            pos = node_manager.nodes[i].get_pos()
+            bundle_adjustment_data_2dpoints.append({})
+            bundle_adjustment_data_3dpoints.append(pos)
+            for cam in cameras:
+                nodeId = node_manager.nodes[i].id
+                if node_manager.nodes[i].id in cam.nodeLocations:
+                    bundle_adjustment_data_2dpoints[-1][cam.name] = cam.nodeLocations[nodeId]
+                    
+    if bundle_adjustment:
+        x0 = np.array([])
+        for i in range(1, len(cameras)):
+            x0 = np.hstack((x0, np.hstack((cameras[i].R, cameras[i].t)).ravel()))
+        
+        for point in bundle_adjustment_data_3dpoints:
+            x0 = np.hstack((x0,point.ravel()))
+            
+        res = least_squares(bundle_adjustment_fun, x0, verbose=2, x_scale='jac', ftol=1e-4, method='trf',
+                            args=(cameras, bundle_adjustment_data_2dpoints))
+        # print(f"res : {res}")
+        params = res.x
+        n_cameras = len(cameras)-1
+        camera_params = params[:n_cameras * 12].reshape((n_cameras, 3, 4))
+
+        for i in range(n_cameras):
+            cameras[i+1].set_R(camera_params[i, :, :3])
+            cameras[i+1].set_t(np.array([camera_params[i, :, 3]]).T)
+
+        bundle_adjustment = False
+        bundle_adjustment_data_2dpoints = []
+        bundle_adjustment_data_3dpoints = []
+
+
+    if DEBUG_MODE:
+        for cam in cameras:
+            img = cam.savedFrame
+            for node in node_manager.nodes:
+                timg = img.copy()
+                if node.id in cam.nodeLocations:
+                    
+              
+                    f, l, c, _ = cam.getNodeInCamSpace(node)
+                    
+                    l = cam.nodeLocations[node.id]
+                    reprojected_point = cam.projectionMatrix @ np.append(
+                        node.get_pos(), np.array([1]))
+                    reprojected_point = reprojected_point / reprojected_point[2]
+     
+                    
+                    cv2.drawContours(timg, [c], 0, (0, 255, 0), 3)
+                    cv2.circle(
+                        timg, (int(l[0]), int(l[1])), 2, (0, 255, 0), -1)
+                    cv2.circle(timg, (int(reprojected_point[0]), int(
+                        reprojected_point[1])), 2, (0, 0, 255), -1)
+                cv2.namedWindow(
+                    f"Cam {cam.name} found color {node.color}", cv2.WINDOW_NORMAL)
+                cv2.resizeWindow(
+                    f"Cam {cam.name} found color {node.color}", 640, 480)
+                cv2.imshow(f"Cam {cam.name} found color {node.color}", timg)
+                cv2.waitKey(1)
+
+    # Update visualizer
     cams_to_send = []
     nodes_to_send = []
     for cam in cameras:
         cams_to_send.append([cam.t.reshape((-1))])
-    for key,node in manager.nodes.items():
-        nodes_to_send.append([node.pos.reshape((-1)),node.color])
-    vis_queue.put((cams_to_send,nodes_to_send))
+    for node in node_manager.nodes:
+        nodes_to_send.append([node.pos[:3].reshape((-1)), node.color])
+    vis_queue.put((cams_to_send, nodes_to_send))
 
+    frameCnt += 1
